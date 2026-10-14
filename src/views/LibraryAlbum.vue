@@ -96,7 +96,7 @@
                 :album="song.album"
                 :show-album-link="false"
               />
-              <div class="track-tags">{{ formatTrackTags(song) }}</div>
+              <div class="track-tags">{{ formatTrackTags(song, { audioSpec: true }) }}</div>
             </div>
             <MobileRowActions
               :open="actionsOpenKey === song.key"
@@ -117,6 +117,15 @@
                 @click.stop="toggleFavorite(song)"
               >
                 <svg viewBox="0 0 24 24" width="16" height="16" :fill="isFavorite(song) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              </button>
+              <button
+                type="button"
+                class="icon-action-btn danger"
+                title="删除"
+                :disabled="deleteBusy"
+                @click.stop="onDeleteSong(song)"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
               </button>
             </MobileRowActions>
           </div>
@@ -169,6 +178,7 @@ import TrackMetaLinks from '../components/TrackMetaLinks.vue'
 import { useListPageSize } from '../composables/useListPageSize.js'
 import { playItem, addToQueue, isInQueue, isPlayingItem, isPaused } from '../stores/player.js'
 import { assertActiveSourceForDownload } from '../stores/downloadGuard.js'
+import { appConfirm } from '../stores/appDialog.js'
 import {
   libraryScanned,
   scanLibrary,
@@ -200,6 +210,7 @@ const coverPendingPauseKey = ref('')
 const isNarrow = ref(false)
 const toast = ref(null)
 const pickPlaylistTrack = ref(null)
+const deleteBusy = ref(false)
 const albumSyncOpen = ref(false)
 const albumSyncBusy = ref(false)
 const albumSyncTracks = ref([])
@@ -442,6 +453,45 @@ function onAddedToPlaylist({ playlist, duplicate }) {
   pickPlaylistTrack.value = null
   if (duplicate) showToast('歌曲已在歌单中', 'info')
   else showToast(`已加入歌单：${playlist?.name || ''}`, 'success')
+}
+
+async function onDeleteSong(song) {
+  if (!song || deleteBusy.value) return
+  const filePath = getTrackFilePath(song)
+  if (!filePath) {
+    showToast('未找到该歌曲的本地文件', 'error')
+    return
+  }
+  const ok = await appConfirm({
+    title: '删除歌曲',
+    message: `确定从磁盘永久删除「${song.name}」？`,
+    hint: '文件将被物理删除，此操作不可恢复。',
+    confirmText: '删除',
+    danger: true,
+    cover: song.picUrl || '',
+  })
+  if (!ok) return
+  deleteBusy.value = true
+  try {
+    const res = await api.library.deleteFiles([filePath])
+    const failed = res?.data?.failed || []
+    if (failed.length) {
+      showToast(failed[0]?.error || '删除失败', 'error')
+      return
+    }
+    actionsOpenKey.value = ''
+    showToast(`已删除：${song.name}`, 'success')
+    // 当前页仅剩被删曲目且非首页：回退一页（page watcher 会自动重新加载）
+    if (album.value.tracks.length <= 1 && page.value > 1) {
+      page.value -= 1
+    } else {
+      await loadAlbum()
+    }
+  } catch (e) {
+    showToast(e?.message || '删除失败', 'error')
+  } finally {
+    deleteBusy.value = false
+  }
 }
 
 async function openAlbumSync() {

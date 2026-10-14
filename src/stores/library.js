@@ -400,6 +400,8 @@ function saveSessionTracks(tracks) {
         format: t.format || '',
         duration: t.duration || 0,
         track: t.trackNo || '',
+        sampleRate: t.sampleRate || 0,
+        bitsPerSample: t.bitsPerSample || 0,
       }))
       sessionStorage.setItem(sessionTracksKey(), JSON.stringify(slim))
     } catch {}
@@ -2356,6 +2358,8 @@ export function fileToLibraryTrack(file) {
     format: file.format || (ext ? ext.toUpperCase() : ''),
     duration: file.duration || 0,
     trackNo: file.track || '',
+    sampleRate: Number(file.sampleRate) || 0,
+    bitsPerSample: Number(file.bitsPerSample) || 0,
     mtime: file.mtime || 0,
   }
 }

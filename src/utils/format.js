@@ -21,7 +21,23 @@ function cleanTagPart(value, { title } = {}) {
   return s
 }
 
-export function formatTrackTags(track) {
+/** 音频规格段：位深 + 采样率（如 "16bit · 44.1kHz"）；任一字段缺失则省略对应项 */
+export function formatAudioSpec(track) {
+  const parts = []
+  const bits = Number(track?.bitsPerSample) || 0
+  if (bits > 0) parts.push(`${bits}bit`)
+  const hz = Number(track?.sampleRate) || 0
+  if (hz > 0) {
+    const khz = hz / 1000
+    parts.push(`${khz % 1 === 0 ? khz.toFixed(0) : khz.toFixed(1)}kHz`)
+  }
+  return parts.join(' · ')
+}
+
+/**
+ * @param {{audioSpec?: boolean}} [options] audioSpec 为真时在格式与时长之间插入位深/采样率
+ */
+export function formatTrackTags(track, options = {}) {
   const parts = []
   const album = cleanTagPart(track.album, { title: track.name })
   if (album) parts.push(album)
@@ -29,6 +45,10 @@ export function formatTrackTags(track) {
   const genre = cleanTagPart(track.genre)
   if (genre) parts.push(genre)
   if (track.format) parts.push(String(track.format).toUpperCase())
+  if (options.audioSpec) {
+    const spec = formatAudioSpec(track)
+    if (spec) parts.push(spec)
+  }
   const dur = formatDuration(track.duration)
   if (dur) parts.push(dur)
   return parts.join(' · ') || '—'

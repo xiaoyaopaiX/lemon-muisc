@@ -191,8 +191,34 @@ function rowToFile(row) {
 const CACHE_LIST_FIELDS = [
   'fileName', 'parsedTitle', 'parsedArtist', 'title', 'artist', 'albumArtist', 'album',
   'year', 'genre', 'comment', 'format', 'duration', 'track',
-  'hasPicture', 'hasLyrics',
+  'hasPicture', 'hasLyrics', 'sampleRate', 'bitsPerSample',
 ]
+
+/**
+ * 音频规格（采样率/位深）以 lite meta 全量存于 meta_json，列表通过 json_extract 读取，
+ * 不新增表列、不增加文件 I/O。极旧 SQLite 无 JSON1 时惰性降级为不输出该字段。
+ */
+let jsonExtractSupported = null
+const META_SPEC_SELECT_COLS = `
+  CAST(json_extract(meta_json, '$.sampleRate') AS INTEGER) AS sample_rate,
+  CAST(json_extract(meta_json, '$.bitsPerSample') AS INTEGER) AS bits_per_sample`
+
+function allRowsWithMetaSpec(db, sqlWithSpec, sqlWithoutSpec, params) {
+  if (jsonExtractSupported === false) {
+    return db.prepare(sqlWithoutSpec).all(...params)
+  }
+  try {
+    const rows = db.prepare(sqlWithSpec).all(...params)
+    jsonExtractSupported = true
+    return rows
+  } catch (e) {
+    if (jsonExtractSupported === null && /json_extract/i.test(String(e?.message || ''))) {
+      jsonExtractSupported = false
+      return db.prepare(sqlWithoutSpec).all(...params)
+    }
+    throw e
+  }
+}
 
 function sanitizeCacheMeta(meta) {
   if (!meta || typeof meta !== 'object') return {}
@@ -744,6 +770,8 @@ function rowToQueryFile(row) {
     track: row.track_no || '',
     hasPicture: Boolean(row.has_picture),
     hasLyrics: Boolean(row.has_lyrics),
+    sampleRate: Number(row.sample_rate) || 0,
+    bitsPerSample: Number(row.bits_per_sample) || 0,
     parsedTitle: row.title || '',
     parsedArtist: row.artist || '',
   }, row)
@@ -818,14 +846,23 @@ export function queryCachedTracks(opts = {}) {
   const where = clauses.join(' AND ')
   const order = tracksOrderSql(opts.sort)
   const total = db.prepare(`SELECT COUNT(*) AS n FROM library_index WHERE ${where}`).get(...params)?.n || 0
-  const rows = db.prepare(`
+  const baseSelect = `
     SELECT file_path, mtime, size, title, artist, album_artist, album, year, genre,
-           duration, format, track_no, has_picture, has_lyrics, track_id
-    FROM library_index
-    WHERE ${where}
-    ORDER BY ${order}
-    LIMIT ? OFFSET ?
-  `).all(...params, limit, offset)
+           duration, format, track_no, has_picture, has_lyrics, track_id`
+  const rows = allRowsWithMetaSpec(
+    db,
+    `${baseSelect},${META_SPEC_SELECT_COLS}
+     FROM library_index
+     WHERE ${where}
+     ORDER BY ${order}
+     LIMIT ? OFFSET ?`,
+    `${baseSelect}
+     FROM library_index
+     WHERE ${where}
+     ORDER BY ${order}
+     LIMIT ? OFFSET ?`,
+    [...params, limit, offset],
+  )
 
   return {
     items: rows.map(rowToQueryFile),
@@ -843,12 +880,19 @@ export function queryTracksByPaths(paths, { limit = 500 } = {}) {
   const list = [...new Set((paths || []).map((p) => normalizePathKey(p)).filter(Boolean))].slice(0, clampInt(limit, 500, 1, 2000))
   if (!list.length) return []
   const placeholders = list.map(() => '?').join(',')
-  const rows = db.prepare(`
+  const baseSelect = `
     SELECT file_path, mtime, size, title, artist, album_artist, album, year, genre,
-           duration, format, track_no, has_picture, has_lyrics, track_id
-    FROM library_index
-    WHERE file_path IN (${placeholders})
-  `).all(...list)
+           duration, format, track_no, has_picture, has_lyrics, track_id`
+  const rows = allRowsWithMetaSpec(
+    db,
+    `${baseSelect},${META_SPEC_SELECT_COLS}
+     FROM library_index
+     WHERE file_path IN (${placeholders})`,
+    `${baseSelect}
+     FROM library_index
+     WHERE file_path IN (${placeholders})`,
+    list,
+  )
   const map = new Map(rows.map((r) => [normalizePathKey(r.file_path), rowToQueryFile(r)]))
   return list.map((p) => map.get(p)).filter(Boolean)
 }
