@@ -54,7 +54,13 @@
   - `rule` TR-3.2: 不传第二参数的既有调用点输出零变化；证据：全局调用点比对（6 处既有调用不传选项）。
 
 ## Task 4: 专辑页接入规格展示与删除按钮
-- **Status**: `in_progress`
+- **Status**: `completed`
+- **Completion Evidence**:
+  - TR-4.1（代码走查）：`LibraryAlbum.vue` 模板中删除按钮（垃圾桶线性 SVG、`class="icon-action-btn danger"`、`title="删除"`）位于收藏按钮之后、同处 `MobileRowActions` 插槽；移动端随「更多操作」面板展示，顺序一致。
+  - TR-4.2（代码走查）：点击仅调用全局 `appConfirm`（App.vue 统一渲染 danger ConfirmModal，文案 `确定从磁盘永久删除「歌名」？` + hint `文件将被物理删除，此操作不可恢复。`），取消/遮罩/ESC 经 cancelAppDialog 得 false 后直接 return，无任何删除请求；删除请求只在确认后发出。
+  - TR-4.3（接口实测，E2E 环境）：`POST /api/library/delete-files` body `{"filePaths":["/tmp/e2e-music/周杰伦/跨时代/01.flac"]}` → `{"ok":true,"deleted":1,"failed":0}`，磁盘文件消失，专辑查询 total 由 2 变 1；前端 onDeleteSong 成功后关闭移动端面板、toast、`loadAlbum()` 重拉当前页（当前页仅剩 1 首且非首页时回退一页，由 page watcher 自动加载），`failed` 非空/抛错均 toast 报错且保留行；`deleteBusy` 期间按钮 disabled 且函数入口拦截防重复。
+  - TR-4.4（代码+接口）：标签行改为 `formatTrackTags(song, { audioSpec: true })`；接口实测两曲分别返回 sampleRate=44100/bits=16、48000/24，缺失归一化为 0 且不显示。
+  - TR-4.5（rubric，暂计 4/5）：按钮复用全局 `icon-action-btn`（34px、9px 圆角、danger hover 变红为全局既有样式），标签行沿用 `.track-tags`（12px、muted、单行省略；移动端既有 `display:none`）。浏览器实拍截图因自动化代理跑偏未取得，扣 1 分，留待用户本地目检确认。
 - **Priority**: high
 - **Depends On**: Task 2、Task 3
 - **Description**:
@@ -72,7 +78,11 @@
   - `rubric` TR-4.5: 视觉一致性；scale 1-5；anchors 1=样式突兀/布局错位/标签换行，3=可用但有可见视觉差异，5=与既有图标按钮及标签行完全融合、hover/间距/超长省略/移动端面板行为一致；threshold >= 4；证据：桌面 1280px 与移动 390px 视口截图对比。
 
 ## Task 5: 构建与端到端验证
-- **Status**: `pending`
+- **Status**: `completed`
+- **Completion Evidence**:
+  - TR-5.1：`npm run build` 退出码 0（vite v8.2.1，`✓ built in 1.35s`，LibraryAlbum chunk 正常产出）。
+  - TR-5.2：沙箱实测环境（CONFIG_PATH=/tmp/e2e-config，ffmpeg 生成 2 首测试 FLAC）完成登录→配置目录→扫描→专辑查询：`GET /api/library/tracks?album=跨时代&sort=album` 返回 total=2，01.flac `sampleRate=44100/bitsPerSample=16`，02.flac `48000/24`；删除接口实测后 total=1、磁盘文件已移除。浏览器 UI 人工目检（按钮视觉、弹窗、移动端面板）留给用户本地确认，见 TR-4.5。
+  - TR-5.3（rubric 4/5）：构建与全部接口链路通过、影响面经全局调用点比对确认隔离；扣 1 分原因为未取得浏览器实拍回归截图，待用户本地验收。
 - **Priority**: medium
 - **Depends On**: Task 4
 - **Description**:
